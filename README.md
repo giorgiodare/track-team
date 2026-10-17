@@ -41,19 +41,68 @@ whole-file fallback.
 
 ### Match stats page
 
-Spec: `docs/specs/player-match-stats.md`. With the backend running as above,
-open `http://127.0.0.1:5500/stats.html`: per-player distance, average/max
-speed, passes, goals and saves for each run (`GET /runs/{id}/stats`), or for
-a JSON file uploaded from the page (`POST /stats`).
+Spec: `docs/specs/player-match-stats.md`. One match = one export JSON
+(`{meta, slots, frames}`), stored in PostgreSQL as a run or read as a file.
+`stats.html` shows, per player: distance, average and max speed, passes made
+and received, goals, and saves (goalkeeper only), plus team totals.
+
+#### Run it
+
+With PostgreSQL, start everything as in the replay section above, then open
+`http://127.0.0.1:5500/stats.html`.
 
 Without Docker/PostgreSQL only the backend and the static server are needed:
-the page falls back to `examples/simulation_trace.json` (or `?data=file.json`)
-and computes its stats via `POST /stats`.
 
 ```bash
 uv run uvicorn track_team.app:app --app-dir src --port 8765
 python3 -m http.server 5500   # open http://127.0.0.1:5500/stats.html
 ```
+
+When `GET /runs` fails or returns no runs, the page loads
+`examples/simulation_trace.json` and sends it to `POST /stats`. Stats are
+always computed by the backend, which starts fine without a database.
+
+URL parameters: `?api=` backend URL (default `http://127.0.0.1:8765`),
+`?run=<id>` preselects a run, `?data=file.json` uses that file and skips
+the database. "Carica JSON" uploads any export file; "Apri replay" opens
+the same match in `index.html`.
+
+#### How the metrics are computed
+
+The JSON has no events, so passes, goals and saves are inferred from
+positions frame by frame (`src/track_team/match_stats.py`, no I/O):
+
+| Metric | Rule |
+|---|---|
+| Distance | last minus first `distance_m` of the player |
+| Avg speed | distance / match duration (shown in km/h) |
+| Possession | nearest player within 1.5 m of the ball for 3 consecutive frames, `attack` phase only |
+| Pass | possession moves from A to B; a goal or a phase change resets the chain |
+| Goal | ball enters the opponent goal (`x ≥ 103.5`, between the posts), credited to the last holder |
+| Save | in `defense`, a ball heading to `x = 0` at ≥ 12 m/s reaches the goalkeeper |
+
+On `examples/simulation_trace.json` this gives 8 passes, 2 goals by P11 and
+0 saves (the simulator has no opponent shots yet).
+
+#### API
+
+| Method | Path | Result |
+|---|---|---|
+| GET | `/runs/{id}/stats` | stats of a stored run (404 if missing) |
+| POST | `/stats` | stats of an uploaded export JSON (422 if invalid) |
+
+When PostgreSQL is down every `/runs…` endpoint answers `503 database not
+reachable` with CORS headers, so browser pages can tell it apart from a
+backend that is not running.
+
+#### Tests
+
+```bash
+uv run pytest      # stats acceptance checks: tests/test_match_stats.py
+```
+
+Tests that need PostgreSQL are skipped when it is not reachable. The page
+itself (AC-10/AC-11) is checked by hand in the browser.
 
 ## Authors
 - Giorgio https://github.com/giorgiodare
