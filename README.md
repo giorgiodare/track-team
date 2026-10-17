@@ -13,7 +13,7 @@ Hacktoberfest 2026
 Help small sports team to gather data from practices to improve team play and generate predictive metrics.
 
 ## Solution
-Using a sensors for each player and a minimun of 4 sensors for field area, we can collect data from the players position during the games and training matches.
+Using tracking tags for each player and a minimun of 4 receivers for field area, we can collect data from the players position during the games and training matches.
 
 ## Stack
 - Backend Python, FastAPI
