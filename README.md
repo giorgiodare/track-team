@@ -25,7 +25,7 @@ curl -X POST http://127.0.0.1:8000/simulation/run-demo
 uv run python scripts/demo_probe.py   # live formation error / centroid
 ```
 
-### Replay from PostgreSQL (no full-JSON download)
+### Replay from PostgreSQL
 
 ```bash
 docker compose up -d                       # PostgreSQL on 127.0.0.1:5434
@@ -46,7 +46,7 @@ Spec: `docs/specs/player-match-stats.md`. One match = one export JSON
 `stats.html` shows, per player: distance, average and max speed, passes made
 and received, goals, and saves (goalkeeper only), plus team totals.
 
-#### Run it
+## Run it
 
 With PostgreSQL, start everything as in the replay section above, then open
 `http://127.0.0.1:5500/stats.html`.
@@ -67,7 +67,7 @@ URL parameters: `?api=` backend URL (default `http://127.0.0.1:8765`),
 the database. "Carica JSON" uploads any export file; "Apri replay" opens
 the same match in `index.html`.
 
-#### How the metrics are computed
+### How the metrics are computed
 
 The JSON has no events, so passes, goals and saves are inferred from
 positions frame by frame (`src/track_team/match_stats.py`, no I/O):
@@ -84,7 +84,7 @@ positions frame by frame (`src/track_team/match_stats.py`, no I/O):
 On `examples/simulation_trace.json` this gives 8 passes, 2 goals by P11 and
 0 saves (the simulator has no opponent shots yet).
 
-#### API
+### API
 
 | Method | Path | Result |
 |---|---|---|
@@ -95,7 +95,7 @@ When PostgreSQL is down every `/runs…` endpoint answers `503 database not
 reachable` with CORS headers, so browser pages can tell it apart from a
 backend that is not running.
 
-#### Tests
+### Tests
 
 ```bash
 uv run pytest      # stats acceptance checks: tests/test_match_stats.py
