@@ -1,12 +1,6 @@
 # track-team
 Hacktoberfest 2026
 
-## Authors
-- Giorgio https://github.com/giorgiodare
-- Imanol https://github.com/ImaKaiber25
-- Loris https://github.com/lorisugolini
-- Roberto https://github.com/RobertoDorata
-
 ## Problem
 Help small sports team to gather data from practices to improve team play and generate predictive metrics.
 
@@ -15,7 +9,7 @@ Using tracking tags for each player and a minimun of 4 receivers for field area,
 
 ## Stack
 - Backend Python, FastAPI
-- Frontend TBD
+- Frontend HTML, CSS, JS
 
 ## Instructions
 
@@ -60,3 +54,9 @@ and computes its stats via `POST /stats`.
 uv run uvicorn track_team.app:app --app-dir src --port 8765
 python3 -m http.server 5500   # open http://127.0.0.1:5500/stats.html
 ```
+
+## Authors
+- Giorgio https://github.com/giorgiodare
+- Imanol https://github.com/ImaKaiber25
+- Loris https://github.com/lorisugolini
+- Roberto https://github.com/RobertoDorata
