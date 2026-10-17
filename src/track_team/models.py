@@ -64,3 +64,37 @@ class Frame(BaseModel):
     ball: Vec2
     players: list[PlayerState]
     metrics: Metrics
+
+
+class PlayerMatchStats(BaseModel):
+    """Per-player statistics over one match (docs/specs/player-match-stats.md)."""
+
+    id: str
+    role: str
+    group: str
+    distance_m: float
+    avg_speed_mps: float
+    max_speed_mps: float
+    passes: int
+    passes_received: int
+    goals: int
+    saves: int | None
+
+
+class TeamMatchStats(BaseModel):
+    """Team totals over one match; goals include unattributed ones."""
+
+    distance_m: float
+    passes: int
+    goals: int
+
+
+class MatchStats(BaseModel):
+    """Statistics of one match: a recorded run or an uploaded trace."""
+
+    run_id: int | None
+    name: str
+    duration_s: float
+    frames: int
+    players: list[PlayerMatchStats]
+    team: TeamMatchStats

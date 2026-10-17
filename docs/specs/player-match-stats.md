@@ -37,7 +37,11 @@ temporali, cache/tabelle di statistiche precalcolate, autenticazione.
   - **run in PostgreSQL** (sorgente principale): `meta`/`slots` da
     `db.get_run`, frame da `db.get_frames` (`src/track_team/db.py`), che
     ricostruisce già i frame nella forma dell'export;
-  - **JSON caricato** dall'utente (upload), per partite non ancora nel DB.
+  - **JSON caricato** dall'utente (upload), per partite non ancora nel DB;
+  - **file JSON senza PostgreSQL** (es. senza Docker): la pagina legge
+    `examples/simulation_trace.json` (o il file di `?data=`) servito accanto
+    a sé e lo manda a `POST /stats`. Il calcolo resta nel backend, che parte
+    anche senza database.
 - Campi usati: `meta.dt_s`, `meta.field_m`, `frames[].t`, `frames[].phase`,
   `frames[].ball {x, y}`, `frames[].players[] {id, role, group, x, y, speed,
   distance_m}`.
@@ -176,7 +180,11 @@ Valori arrotondati a 2 decimali nel backend.
 
 - Errori: `404 run not found` (stesso messaggio degli altri `/runs/{id}`);
   `422` se il JSON caricato non ha `frames` o i frame non hanno `players`;
-  `503` se PostgreSQL non è raggiungibile.
+  `503 database not reachable` se PostgreSQL non è raggiungibile. Il 503 è
+  un exception handler globale su `psycopg.OperationalError`, quindi vale
+  anche per `/runs`, `/runs/{id}` e `/runs/{id}/frames` ed esce con gli
+  header CORS: un 500 non gestito ne è privo e il browser lo vedrebbe come
+  backend irraggiungibile, impedendo il fallback.
 - CORS: già abilitato in `app.py` (`allow_origins=["*"]`), niente da
   aggiungere.
 
@@ -194,9 +202,16 @@ Pagina statica alla radice del repo, stile coerente con `index.html`
   (km/h), Vel. max (km/h), Passaggi, Ricevuti, Gol, Parate. Ordinabile
   cliccando l'intestazione (default per id). Il valore più alto di ogni
   colonna numerica è evidenziato. Parate "—" per i non portieri.
+- **Fallback senza PostgreSQL:** se `GET /runs` risponde con errore (503) o
+  lista vuota, la pagina carica `examples/simulation_trace.json` e mostra
+  le sue statistiche; il selettore indica il file e lo stato riporta
+  "file, senza database". Con `?data=file.json` si usa direttamente quel
+  file, senza interrogare `/runs` (come `index.html`). "Apri replay" punta
+  a `index.html?data=…` in questo caso, a `index.html?run=<id>` con il DB.
 - **Stati:** caricamento; backend non raggiungibile (messaggio con il
-  comando `uvicorn` per avviarlo); DB vuoto (messaggio con
-  `scripts/seed_db.py`); file non valido (testo dal `detail` del 422).
+  comando `uvicorn` per avviarlo; PostgreSQL non serve); file JSON non
+  leggibile (messaggio con `python3 -m http.server`); file non valido
+  (testo dal `detail` del 422).
 - URL backend: query param `?api=`, default `http://127.0.0.1:8765`, come
   `index.html`. Partita preselezionata con `?run=<id>`.
 
@@ -238,6 +253,9 @@ Sul run `demo-65s` creato da `scripts/seed_db.py` e, identico, su
   che usano il DB si saltano se PostgreSQL non è raggiungibile.
 - AC-10: la pagina mostra la tabella per `demo-65s` con i valori
   di AC-02…AC-06 e l'ordinamento per colonna funziona.
+- AC-11: senza PostgreSQL (backend avviato, Docker spento) `GET /runs`
+  risponde 503 con header CORS, e la pagina mostra le statistiche di
+  `examples/simulation_trace.json` con gli stessi valori di AC-02…AC-06.
 
 I valori di AC-04/AC-05 sono stati verificati con un probe sul trace
 attuale. Se si rigenera il trace con un altro seed o un'altra durata vanno
@@ -250,7 +268,7 @@ sintetici, più test API con `TestClient`), `uv run ruff check`,
 `uv run mypy src/`. Prova live, come nel README:
 
 ```bash
-docker compose up -d
+docker compose up -d          # opzionale: senza, si usa il JSON di esempio
 uv run python scripts/seed_db.py
 uv run uvicorn track_team.app:app --app-dir src --port 8765
 python3 -m http.server 5500

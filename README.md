@@ -26,3 +26,19 @@ python3 -m http.server 5500                # serves index.html
 The page reads frames from `GET /runs/{id}/frames` in chunks of 100
 (10 s at 10 fps) with prefetch; `?data=file.json` keeps the old
 whole-file fallback.
+
+## Match stats page
+
+Spec: `docs/specs/player-match-stats.md`. With the backend running as above,
+open `http://127.0.0.1:5500/stats.html`: per-player distance, average/max
+speed, passes, goals and saves for each run (`GET /runs/{id}/stats`), or for
+a JSON file uploaded from the page (`POST /stats`).
+
+Without Docker/PostgreSQL only the backend and the static server are needed:
+the page falls back to `examples/simulation_trace.json` (or `?data=file.json`)
+and computes its stats via `POST /stats`.
+
+```bash
+uv run uvicorn track_team.app:app --app-dir src --port 8765
+python3 -m http.server 5500   # open http://127.0.0.1:5500/stats.html
+```

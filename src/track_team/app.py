@@ -5,12 +5,15 @@ from collections.abc import AsyncIterator
 from contextlib import asynccontextmanager
 from typing import Any
 
-from fastapi import FastAPI, HTTPException, WebSocket, WebSocketDisconnect
+import psycopg
+from fastapi import FastAPI, HTTPException, Request, WebSocket, WebSocketDisconnect
 from fastapi.middleware.cors import CORSMiddleware
+from fastapi.responses import JSONResponse
 
 from track_team import db
 from track_team.engine import Simulation
-from track_team.models import Frame, Phase
+from track_team.match_stats import compute_match_stats
+from track_team.models import Frame, MatchStats, Phase
 
 sim = Simulation(seed=7)
 
@@ -36,6 +39,15 @@ app.add_middleware(
     allow_methods=["*"],
     allow_headers=["*"],
 )
+
+
+@app.exception_handler(psycopg.OperationalError)
+def database_unreachable(_request: Request, _exc: Exception) -> JSONResponse:
+    """Answer 503 (with CORS headers) instead of a bare 500 when Postgres is down.
+
+    Lets pages fall back to JSON files when running without Docker.
+    """
+    return JSONResponse(status_code=503, content={"detail": "database not reachable"})
 
 
 @app.get("/health")
@@ -71,6 +83,33 @@ def run_frames(run_id: int, from_idx: int = 0, limit: int = 100) -> dict[str, An
             conn, run_id, from_idx=max(0, from_idx), limit=max(1, min(limit, 500))
         )
     return {"run_id": run_id, "from_idx": max(0, from_idx), "frames": frames}
+
+
+@app.get("/runs/{run_id}/stats")
+def run_stats(run_id: int) -> MatchStats:
+    """Return per-player match statistics computed over every frame of a run."""
+    with db.connect() as conn:
+        detail = db.get_run(conn, run_id)
+        if detail is None:
+            raise HTTPException(status_code=404, detail="run not found")
+        frames = db.get_frames(
+            conn, run_id, from_idx=0, limit=max(1, int(detail["frame_count"]))
+        )
+    trace = {"meta": detail["meta"], "slots": detail["slots"], "frames": frames}
+    try:
+        return compute_match_stats(trace, run_id=run_id, name=detail["name"])
+    except ValueError as exc:
+        raise HTTPException(status_code=422, detail=str(exc)) from exc
+
+
+@app.post("/stats")
+def upload_stats(trace: dict[str, Any]) -> MatchStats:
+    """Return match statistics for an uploaded export JSON (not stored)."""
+    try:
+        return compute_match_stats(trace, run_id=None, name="upload")
+    except (ValueError, KeyError, TypeError) as exc:
+        detail = f"invalid match JSON: {exc}"
+        raise HTTPException(status_code=422, detail=detail) from exc
 
 
 @app.post("/simulation/start")
