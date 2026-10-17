@@ -5,7 +5,7 @@ Hacktoberfest 2026
 
 ## Authors
 - Giorgio https://github.com/giorgiodare
-- Immanuel https://github.com/ImaKaiber25
+- Imanol https://github.com/ImaKaiber25
 - Loris https://github.com/lorisugolini
 - Roberto https://github.com/RobertoDorata
 
