@@ -1,0 +1,524 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Training pitch replay</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Bricolage+Grotesque:opsz,wght@12..96,400;12..96,600;12..96,700&display=swap" rel="stylesheet">
+<style>
+:root{
+  --bg:#E9EEE8; --panel:#FAFBF9; --ink:#17261D; --muted:#5B6C60; --rule:#D3DCD2;
+  --radius:12px;
+  font-family:"Bricolage Grotesque",system-ui,-apple-system,"Segoe UI",sans-serif;
+}
+*{box-sizing:border-box}
+html,body{height:100%;margin:0}
+body{background:var(--bg);color:var(--ink);display:flex;flex-direction:column}
+header{display:flex;align-items:center;justify-content:space-between;gap:16px;padding:14px 20px}
+h1{font-size:1.25rem;font-weight:700;margin:0;letter-spacing:-.01em}
+.status{display:inline-flex;align-items:center;gap:8px;font-size:.9rem;color:var(--muted)}
+.status i{width:10px;height:10px;border-radius:50%;background:#B8860B}
+.status[data-state="ok"] i{background:#2E9E5B}
+.status[data-state="error"] i{background:#C0392B}
+main{flex:1;min-height:0;display:grid;grid-template-columns:minmax(0,1fr) 340px;gap:16px;padding:0 20px 20px}
+.stage{min-height:0;display:flex;flex-direction:column;background:var(--panel);border-radius:var(--radius);padding:8px;border:1px solid var(--rule)}
+canvas{flex:1;min-height:0;width:100%;display:block}
+.transport{display:flex;align-items:center;gap:12px;padding:8px 8px 4px}
+.transport button,.transport select{font:inherit;color:inherit;background:#fff;border:1px solid var(--rule);border-radius:8px;padding:6px 12px;cursor:pointer}
+.transport button{min-width:76px;font-weight:600}
+.transport input[type=range]{flex:1;accent-color:#376546}
+.time{font-variant-numeric:tabular-nums;color:var(--muted);font-size:.9rem;min-width:92px;text-align:right}
+button:focus-visible,select:focus-visible,input:focus-visible,.row:focus-visible{outline:2px solid #1F4FBF;outline-offset:2px}
+aside{display:flex;flex-direction:column;min-height:0;background:var(--panel);border:1px solid var(--rule);border-radius:var(--radius)}
+aside h2{font-size:1rem;margin:0;padding:16px 16px 8px;font-weight:600}
+#list{list-style:none;margin:0;padding:0 8px;overflow:auto;flex:1;min-height:120px}
+.row{display:grid;grid-template-columns:14px 1fr auto;gap:2px 12px;align-items:center;width:100%;text-align:left;
+  background:none;border:0;border-radius:8px;padding:8px;font:inherit;color:inherit;cursor:pointer}
+.row:hover{background:#EFF3EE}
+.row[aria-pressed="true"]{background:#E1EADF}
+.dot{width:14px;height:14px;border-radius:50%;grid-row:span 2}
+.name{font-weight:600}
+.name small{font-weight:400;color:var(--muted);margin-left:6px}
+.speed{font-variant-numeric:tabular-nums;font-weight:600}
+.meta{grid-column:2/4;font-size:.85rem;color:var(--muted);font-variant-numeric:tabular-nums}
+.empty{padding:12px 8px;color:var(--muted);font-size:.95rem;line-height:1.45}
+#metrics{margin:0;padding:8px 16px;border-top:1px solid var(--rule);display:grid;grid-template-columns:1fr auto;gap:4px 12px;font-size:.9rem}
+#metrics dt{color:var(--muted)}
+#metrics dd{margin:0;font-weight:600;font-variant-numeric:tabular-nums;text-align:right}
+.controls{border-top:1px solid var(--rule);padding:12px 16px;display:grid;gap:8px}
+.opt{display:flex;align-items:center;gap:10px;font-size:.95rem;cursor:pointer}
+.file{flex-direction:column;align-items:flex-start;gap:6px;font-size:.9rem}
+@media (max-width:860px){
+  body{height:auto}
+  main{grid-template-columns:1fr}
+  .stage{height:80vw;min-height:320px}
+  #list{max-height:360px}
+}
+</style>
+</head>
+<body>
+<header>
+  <h1>Training pitch replay</h1>
+  <div class="status" id="status" data-state="wait" role="status" aria-live="polite"><i></i><span>Loading data</span></div>
+</header>
+
+<main>
+  <div class="stage">
+    <canvas id="pitch" aria-label="Player and ball positions on the pitch"></canvas>
+    <div class="transport">
+      <button type="button" id="play">Pause</button>
+      <input type="range" id="scrub" min="0" max="1" step="0.1" value="0" aria-label="Time">
+      <span class="time" id="time">0.0 / 0.0 s</span>
+      <select id="rate" aria-label="Playback speed">
+        <option value="0.5">0.5x</option><option value="1" selected>1x</option>
+        <option value="2">2x</option><option value="4">4x</option>
+      </select>
+    </div>
+  </div>
+  <aside>
+    <h2>Players</h2>
+    <ul id="list"></ul>
+    <dl id="metrics"></dl>
+    <div class="controls">
+      <label class="opt"><input type="checkbox" id="optTrails" checked> Show trails</label>
+      <label class="opt"><input type="checkbox" id="optSlots" checked> Show formation slots</label>
+      <label class="opt file">Load another JSON file <input type="file" id="file" accept=".json,application/json"></label>
+    </div>
+  </aside>
+</main>
+
+<script>
+/* ---------- Data sources ----------
+   Primary: PostgreSQL via the backend API (?api=http://127.0.0.1:8765, default).
+   Frames arrive in chunks of 100 (10 s at 10 fps), cached + prefetched.
+   Fallback: ?data=file.json loads a whole export JSON as before. */
+
+const params = new URLSearchParams(location.search);
+const API = params.get('api') || 'http://127.0.0.1:8765';
+const DATA_URL = params.get('data');
+const CHUNK = 100, CACHE_MAX = 4;
+const SHOW_FPS = params.get('fps') === '1';
+const GROUP_COLORS = { GK: '#F2B636', DEF: '#2E86DE', MID: '#E4572E', ATT: '#8E5BD6' };
+const TRAIL_S = 4, GRID_M = 10, MARGIN = 34;
+const METRICS = [
+  ['Formation error', 'formation_error_m'],
+  ['Team length', 'team_length_m'],
+  ['Team width', 'team_width_m'],
+  ['Gap defence to midfield', 'line_gap_def_mid_m'],
+  ['Gap midfield to attack', 'line_gap_mid_att_m']
+];
+
+const $ = id => document.getElementById(id);
+const canvas = $('pitch');
+let ctx = canvas.getContext('2d');
+let pitchLayer = null;
+const listEl = $('list'), metricsEl = $('metrics'), statusEl = $('status');
+const playBtn = $('play'), scrub = $('scrub'), timeEl = $('time'), rateSel = $('rate');
+const optTrails = $('optTrails'), optSlots = $('optSlots');
+
+let frames = [], slots = [], slotById = new Map(), corners = [];
+let pitch = { w: 105, h: 68 }, dt = 0.1, tStart = 0, tEnd = 0;
+let cur = 0, playing = true, rate = 1, selected = null, dragging = false;
+let rows = new Map(), metricEls = new Map(), shownIdx = -1, lastNow = 0;
+/* API mode: frames are not held whole, only cached chunks by start index. */
+let runId = null, frameCount = 0;
+const chunkCache = new Map(), chunkPending = new Map();
+let fpsFrames = 0, fpsLast = performance.now();
+
+/* ---------- Status ---------- */
+function setStatus(state, text){
+  statusEl.dataset.state = state;
+  statusEl.querySelector('span').textContent = text;
+}
+
+/* ---------- Loading ---------- */
+function message(text){
+  listEl.replaceChildren();
+  const li = document.createElement('li');
+  li.className = 'empty'; li.textContent = text;
+  listEl.append(li);
+}
+
+async function loadUrl(url){
+  setStatus('wait', 'Loading data');
+  try {
+    const r = await fetch(url);
+    if (!r.ok) throw new Error('HTTP ' + r.status);
+    init(await r.json(), url);
+  } catch (err) {
+    setStatus('error', 'Could not load ' + url);
+    message('Could not load ' + url + '. Serve this folder over http (for example with python -m http.server) so the browser can fetch it, or pick the file below.');
+  }
+}
+
+/* ---------- PostgreSQL API source (chunked) ---------- */
+async function fetchChunk(start){
+  if (chunkCache.has(start) || chunkPending.has(start)) return chunkPending.get(start);
+  const p = fetch(`${API}/runs/${runId}/frames?from_idx=${start}&limit=${CHUNK}`)
+    .then(r => { if (!r.ok) throw new Error('HTTP ' + r.status); return r.json(); })
+    .then(d => {
+      chunkCache.set(start, d.frames);
+      while (chunkCache.size > CACHE_MAX){
+        const oldest = chunkCache.keys().next().value;
+        if (oldest === start) break;
+        chunkCache.delete(oldest);
+      }
+    })
+    .catch(() => {})
+    .finally(() => chunkPending.delete(start));
+  chunkPending.set(start, p);
+  return p;
+}
+
+function getFrame(i){
+  if (runId === null) return frames[i] || null;
+  if (i < 0 || i >= frameCount) return null;
+  const start = Math.floor(i / CHUNK) * CHUNK;
+  const chunk = chunkCache.get(start);
+  return chunk ? (chunk[i - start] || null) : null;
+}
+
+function ensureChunks(i){
+  if (runId === null) return;
+  const start = Math.floor(i / CHUNK) * CHUNK;
+  fetchChunk(start);
+  if (start + CHUNK < frameCount) fetchChunk(start + CHUNK);
+}
+
+async function loadApi(){
+  setStatus('wait', 'Loading runs from ' + API);
+  try {
+    const runs = await (await fetch(`${API}/runs`)).json();
+    if (!runs.length) throw new Error('no runs');
+    const wanted = params.get('run');
+    const run = wanted ? runs.find(r => String(r.id) === wanted)
+      : runs.reduce((a, b) => (b.frame_count > a.frame_count ? b : a));
+    if (!run) throw new Error('run not found');
+    const detail = await (await fetch(`${API}/runs/${run.id}`)).json();
+    runId = run.id;
+    frameCount = detail.frame_count;
+    const m = detail.meta || {};
+    if (m.field_m) pitch = { w: m.field_m.length, h: m.field_m.width };
+    corners = m.sensor_corners || [{x:0,y:0},{x:pitch.w,y:0},{x:0,y:pitch.h},{x:pitch.w,y:pitch.h}];
+    dt = m.dt_s || 0.1;
+    slots = detail.slots || [];
+    slotById = new Map(slots.map(s => [s.id, s]));
+    tStart = 0; tEnd = detail.duration_s || (frameCount - 1) * dt; cur = tStart;
+    scrub.min = tStart; scrub.max = tEnd; scrub.step = dt; scrub.value = cur;
+    selected = null; shownIdx = -1; pitchLayer = null;
+    await fetchChunk(0);
+    const first = getFrame(0);
+    if (!first) throw new Error('no frames');
+    buildRows(first);
+    buildMetrics();
+    setStatus('ok', `PostgreSQL run ${run.id} (${run.name}), ${frameCount} frames at ${Math.round(1/dt)} fps`);
+  } catch (err) {
+    setStatus('error', 'Could not load from ' + API);
+    message('Could not load runs from the backend API. Start Postgres (docker compose up -d), seed it (uv run python scripts/seed_db.py) and the backend, or pick a JSON file below.');
+  }
+}
+
+$('file').addEventListener('change', async e => {
+  const f = e.target.files[0];
+  if (!f) return;
+  try { init(JSON.parse(await f.text()), f.name); }
+  catch (err) { setStatus('error', 'Invalid JSON'); message('That file is not valid JSON.'); }
+});
+
+function init(d, name){
+  const fs = (d.frames || []).slice().sort((a, b) => a.t - b.t);
+  if (!fs.length || !fs[0].players || !fs[0].players.length){
+    setStatus('error', 'No frames found');
+    message('The file has no frames with players.');
+    return;
+  }
+  frames = fs;
+  runId = null; frameCount = frames.length; chunkCache.clear();
+  const m = d.meta || {};
+  if (m.field_m) pitch = { w: m.field_m.length, h: m.field_m.width };
+  corners = m.sensor_corners || [{x:0,y:0},{x:pitch.w,y:0},{x:0,y:pitch.h},{x:pitch.w,y:pitch.h}];
+  dt = m.dt_s || (frames.length > 1 ? frames[1].t - frames[0].t : 0.1);
+  slots = d.slots || [];
+  slotById = new Map(slots.map(s => [s.id, s]));
+  tStart = frames[0].t; tEnd = frames[frames.length - 1].t; cur = tStart;
+  scrub.min = tStart; scrub.max = tEnd; scrub.step = dt; scrub.value = cur;
+  selected = null; shownIdx = -1; pitchLayer = null;
+  buildRows(frames[0]);
+  buildMetrics();
+  setStatus('ok', `${name}, ${frames.length} frames`);
+}
+
+/* ---------- Player list and metrics ---------- */
+function buildRows(first){
+  listEl.replaceChildren(); rows.clear();
+  for (const p of first.players){
+    const li = document.createElement('li');
+    const b = document.createElement('button');
+    b.className = 'row'; b.type = 'button'; b.setAttribute('aria-pressed', 'false');
+    b.innerHTML = '<span class="dot"></span><span class="name"></span><span class="speed"></span><span class="meta"></span>';
+    b.querySelector('.dot').style.background = GROUP_COLORS[p.group] || '#888';
+    const name = b.querySelector('.name');
+    name.textContent = p.role;
+    const sm = document.createElement('small'); sm.textContent = p.id; name.append(sm);
+    b.addEventListener('click', () => {
+      selected = selected === p.id ? null : p.id;
+      for (const [id, r] of rows) r.el.setAttribute('aria-pressed', String(id === selected));
+    });
+    li.append(b); listEl.append(li);
+    rows.set(p.id, { el: b, speed: b.querySelector('.speed'), meta: b.querySelector('.meta') });
+  }
+}
+
+function buildMetrics(){
+  metricsEl.replaceChildren(); metricEls.clear();
+  for (const [label, key] of METRICS){
+    const dtEl = document.createElement('dt'), ddEl = document.createElement('dd');
+    dtEl.textContent = label; ddEl.textContent = '-';
+    metricsEl.append(dtEl, ddEl); metricEls.set(key, ddEl);
+  }
+}
+
+function updateUI(a){
+  for (const p of a.players){
+    const r = rows.get(p.id); if (!r) continue;
+    r.speed.textContent = p.speed.toFixed(1) + ' m/s';
+    r.meta.textContent = `${p.distance_m.toFixed(0)} m covered, at ${p.x.toFixed(1)} / ${p.y.toFixed(1)}`;
+  }
+  for (const [key, el] of metricEls){
+    const v = a.metrics && a.metrics[key];
+    el.textContent = typeof v === 'number' ? v.toFixed(1) + ' m' : '-';
+  }
+  if (a.phase) statusEl.querySelector('span').textContent =
+    statusEl.querySelector('span').textContent.replace(/ \| phase: .*/, '') + ' | phase: ' + a.phase;
+}
+
+/* ---------- Sampling the timeline ---------- */
+function frameIndex(t){
+  if (runId !== null) return Math.min(frameCount - 1, Math.max(0, Math.floor((t - tStart) / dt)));
+  let lo = 0, hi = frames.length - 1;
+  while (lo < hi){ const m = (lo + hi + 1) >> 1; if (frames[m].t <= t) lo = m; else hi = m - 1; }
+  return lo;
+}
+const lerp = (p, q, k) => p + (q - p) * k;
+
+function sample(t){
+  const i = frameIndex(t), a = getFrame(i);
+  if (!a) return null;
+  const b = getFrame(Math.min(i + 1, frameCount - 1)) || a;
+  const span = b.t - a.t;
+  const k = span > 0 ? Math.min(Math.max((t - a.t) / span, 0), 1) : 0;
+  return { i, a, b, k };
+}
+
+/* ---------- Transport ---------- */
+function setPlaying(v){ playing = v; playBtn.textContent = v ? 'Pause' : 'Play'; }
+playBtn.addEventListener('click', () => {
+  if (!playing && cur >= tEnd) cur = tStart;
+  setPlaying(!playing);
+});
+rateSel.addEventListener('change', () => { rate = parseFloat(rateSel.value); });
+scrub.addEventListener('pointerdown', () => { dragging = true; });
+scrub.addEventListener('pointerup', () => { dragging = false; });
+scrub.addEventListener('input', () => { cur = parseFloat(scrub.value); });
+
+/* ---------- Canvas ---------- */
+const view = { s: 1, ox: 0, oy: 0, cw: 0, ch: 0 };
+
+function resize(){
+  const r = canvas.getBoundingClientRect(), dpr = window.devicePixelRatio || 1;
+  canvas.width = Math.round(r.width * dpr); canvas.height = Math.round(r.height * dpr);
+  ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
+  view.cw = r.width; view.ch = r.height;
+  pitchLayer = null;
+}
+
+function ensurePitchLayer(){
+  if (pitchLayer) return;
+  layout();
+  pitchLayer = document.createElement('canvas');
+  pitchLayer.width = canvas.width; pitchLayer.height = canvas.height;
+  const pctx = pitchLayer.getContext('2d');
+  const main = ctx;
+  ctx = pctx;
+  pctx.setTransform(window.devicePixelRatio || 1, 0, 0, window.devicePixelRatio || 1, 0, 0);
+  drawPitch();
+  ctx = main;
+}
+new ResizeObserver(resize).observe(canvas);
+
+function layout(){
+  const s = Math.min((view.cw - 2 * MARGIN) / pitch.w, (view.ch - 2 * MARGIN) / pitch.h);
+  view.s = Math.max(s, 1);
+  view.ox = (view.cw - pitch.w * view.s) / 2;
+  view.oy = (view.ch - pitch.h * view.s) / 2;
+}
+const px = (x, y) => [view.ox + x * view.s, view.oy + (pitch.h - y) * view.s];
+const FONT = '"Bricolage Grotesque", system-ui, sans-serif';
+
+function rectM(x, y, w, h){
+  const [a, b] = px(x, y + h);
+  ctx.strokeRect(a, b, w * view.s, h * view.s);
+}
+
+function drawPitch(){
+  const [x0, y0] = px(0, pitch.h), W = pitch.w * view.s, H = pitch.h * view.s;
+  ctx.fillStyle = '#376546'; ctx.fillRect(x0, y0, W, H);
+  ctx.fillStyle = 'rgba(0,0,0,.05)';
+  for (let x = 0, i = 0; x < pitch.w; x += GRID_M, i++)
+    if (i % 2) ctx.fillRect(x0 + x * view.s, y0, Math.min(GRID_M, pitch.w - x) * view.s, H);
+  // cartesian grid
+  ctx.strokeStyle = 'rgba(255,255,255,.14)'; ctx.lineWidth = 1; ctx.beginPath();
+  for (let x = GRID_M; x < pitch.w; x += GRID_M){ const [a, b] = px(x, 0), [, c] = px(x, pitch.h); ctx.moveTo(a, b); ctx.lineTo(a, c); }
+  for (let y = GRID_M; y < pitch.h; y += GRID_M){ const [a, b] = px(0, y), [c] = px(pitch.w, y); ctx.moveTo(a, b); ctx.lineTo(c, b); }
+  ctx.stroke();
+  // chalk lines
+  ctx.strokeStyle = 'rgba(255,255,255,.75)'; ctx.lineWidth = 2;
+  ctx.strokeRect(x0, y0, W, H);
+  const [mx, my] = px(pitch.w / 2, pitch.h / 2);
+  ctx.beginPath(); ctx.moveTo(mx, y0); ctx.lineTo(mx, y0 + H); ctx.stroke();
+  const football = pitch.w >= 90;
+  ctx.beginPath(); ctx.arc(mx, my, (football ? 9.15 : pitch.h * 0.15) * view.s, 0, Math.PI * 2); ctx.stroke();
+  if (football){
+    const cy = pitch.h / 2;
+    rectM(0, cy - 20.16, 16.5, 40.32); rectM(pitch.w - 16.5, cy - 20.16, 16.5, 40.32);
+    rectM(0, cy - 9.16, 5.5, 18.32);   rectM(pitch.w - 5.5, cy - 9.16, 5.5, 18.32);
+  }
+  // axis ticks in metres
+  ctx.fillStyle = '#5B6C60'; ctx.font = '12px ' + FONT;
+  ctx.textAlign = 'center'; ctx.textBaseline = 'top';
+  for (let x = 0; x <= pitch.w; x += GRID_M){ const [a, b] = px(x, 0); ctx.fillText(x + ' m', a, b + 22); }
+  ctx.textAlign = 'right'; ctx.textBaseline = 'middle';
+  for (let y = GRID_M; y <= pitch.h; y += GRID_M){ const [a, b] = px(0, y); ctx.fillText(y + ' m', a - 22, b); }
+  // corner sensors
+  ctx.textAlign = 'center'; ctx.textBaseline = 'middle';
+  corners.forEach((c, n) => {
+    const [a, b] = px(c.x, c.y);
+    const dx = c.x <= 0 ? -1 : 1, dy = c.y <= 0 ? 1 : -1;
+    ctx.fillStyle = '#17261D'; ctx.fillRect(a - 6, b - 6, 12, 12);
+    ctx.fillStyle = '#FAFBF9'; ctx.fillRect(a - 3, b - 3, 6, 6);
+    ctx.fillStyle = '#17261D'; ctx.font = '600 12px ' + FONT;
+    ctx.fillText('S' + (n + 1), a + dx * 20, b + dy * 14);
+  });
+}
+
+function hexA(hex, a){
+  const n = parseInt(hex.slice(1), 16);
+  return `rgba(${n >> 16},${(n >> 8) & 255},${n & 255},${a})`;
+}
+
+function drawSlots(){
+  if (!optSlots.checked) return;
+  ctx.setLineDash([3, 3]); ctx.lineWidth = 1.5;
+  for (const s of slots){
+    const [x, y] = px(s.x, s.y);
+    ctx.strokeStyle = hexA(GROUP_COLORS[s.group] || '#ffffff', 0.9);
+    ctx.beginPath(); ctx.arc(x, y, 12, 0, Math.PI * 2); ctx.stroke();
+  }
+  ctx.setLineDash([]);
+}
+
+function drawPlayers(smp){
+  const { i, a, b, k } = smp;
+  const trailN = Math.max(2, Math.round(TRAIL_S / dt));
+  const first = Math.max(0, i - trailN);
+  a.players.forEach((pa, n) => {
+    const pb = b.players[n] && b.players[n].id === pa.id ? b.players[n] : pa;
+    const x = lerp(pa.x, pb.x, k), y = lerp(pa.y, pb.y, k);
+    const color = GROUP_COLORS[pa.group] || '#ffffff';
+    ctx.globalAlpha = selected && selected !== pa.id ? 0.3 : 1;
+    const [cx, cy] = px(x, y);
+
+    const slot = slotById.get(pa.id);
+    if (optSlots.checked && slot){
+      const [sx, sy] = px(slot.x, slot.y);
+      ctx.strokeStyle = hexA('#ffffff', 0.35); ctx.lineWidth = 1.5;
+      ctx.beginPath(); ctx.moveTo(sx, sy); ctx.lineTo(cx, cy); ctx.stroke();
+    }
+    if (optTrails.checked){
+      /* One polyline per player (was one stroke per segment: the main lag). */
+      ctx.strokeStyle = hexA(color, 0.55); ctx.lineWidth = 3; ctx.lineCap = 'round';
+      ctx.beginPath();
+      let started = false;
+      for (let j = first; j <= i; j += 2){
+        const f = getFrame(j), q = f && f.players[n];
+        if (!q || q.id !== pa.id) continue;
+        const cp = px(q.x, q.y);
+        if (!started){ ctx.moveTo(cp[0], cp[1]); started = true; } else ctx.lineTo(cp[0], cp[1]);
+      }
+      ctx.lineTo(cx, cy);
+      if (started) ctx.stroke();
+    }
+    if (selected === pa.id){
+      ctx.strokeStyle = '#fff'; ctx.lineWidth = 2;
+      ctx.beginPath(); ctx.arc(cx, cy, 19, 0, Math.PI * 2); ctx.stroke();
+    }
+    ctx.fillStyle = color; ctx.strokeStyle = '#fff'; ctx.lineWidth = 2.5;
+    ctx.beginPath(); ctx.arc(cx, cy, 12, 0, Math.PI * 2); ctx.fill(); ctx.stroke();
+    ctx.fillStyle = '#fff'; ctx.font = '700 12px ' + FONT;
+    ctx.textAlign = 'center'; ctx.textBaseline = 'middle';
+    ctx.fillText(pa.id.replace(/\D/g, '') || pa.id, cx, cy + 0.5);
+    ctx.textBaseline = 'top';
+    ctx.fillText(pa.role, cx, cy + 17);
+    ctx.globalAlpha = 1;
+  });
+}
+
+function drawBallAndCentroid(smp){
+  const { a, b, k } = smp;
+  const m = a.metrics && a.metrics.centroid;
+  if (m){
+    const [x, y] = px(m.x, m.y);
+    ctx.strokeStyle = 'rgba(255,255,255,.9)'; ctx.lineWidth = 2;
+    ctx.beginPath(); ctx.moveTo(x - 7, y); ctx.lineTo(x + 7, y); ctx.moveTo(x, y - 7); ctx.lineTo(x, y + 7); ctx.stroke();
+  }
+  if (a.ball){
+    const bb = b.ball || a.ball;
+    const [x, y] = px(lerp(a.ball.x, bb.x, k), lerp(a.ball.y, bb.y, k));
+    ctx.fillStyle = '#fff'; ctx.strokeStyle = '#17261D'; ctx.lineWidth = 2;
+    ctx.beginPath(); ctx.arc(x, y, 6, 0, Math.PI * 2); ctx.fill(); ctx.stroke();
+  }
+}
+
+/* ---------- Main loop ---------- */
+function frame(now){
+  const elapsed = Math.min((now - lastNow) / 1000, 0.25); lastNow = now;
+  if (SHOW_FPS){
+    fpsFrames++;
+    if (now - fpsLast >= 500){
+      const fps = Math.round(fpsFrames * 1000 / (now - fpsLast));
+      statusEl.querySelector('span').dataset.fps = fps;
+      document.title = `Training pitch replay — ${fps} fps`;
+      fpsFrames = 0; fpsLast = now;
+    }
+  }
+  ctx.clearRect(0, 0, view.cw, view.ch);
+  layout(); ensurePitchLayer();
+  if (pitchLayer) ctx.drawImage(pitchLayer, 0, 0, view.cw, view.ch);
+  if (frameCount){
+    if (playing && !dragging){
+      cur += elapsed * rate;
+      if (cur >= tEnd){ cur = tStart; shownIdx = -1; }
+    }
+    cur = Math.min(Math.max(cur, tStart), tEnd);
+    ensureChunks(frameIndex(cur));
+    const smp = sample(cur);
+    if (smp){
+      if (smp.i !== shownIdx){ shownIdx = smp.i; updateUI(smp.a); }
+      if (!dragging) scrub.value = cur;
+      timeEl.textContent = `${(cur - tStart).toFixed(1)} / ${(tEnd - tStart).toFixed(1)} s`;
+      drawSlots(); drawPlayers(smp); drawBallAndCentroid(smp);
+    }
+  }
+  requestAnimationFrame(frame);
+}
+
+/* ---------- Start ---------- */
+resize();
+if (DATA_URL){ message('Loading ' + DATA_URL); loadUrl(DATA_URL); }
+else loadApi();
+requestAnimationFrame(t => { lastNow = t; requestAnimationFrame(frame); });
+</script>
+</body>
+</html>

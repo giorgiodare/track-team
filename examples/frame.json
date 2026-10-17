@@ -1,0 +1,142 @@
+{
+  "t": 3.0,
+  "phase": "forming",
+  "ball": {
+    "x": 52.5,
+    "y": 34.0
+  },
+  "players": [
+    {
+      "id": "P1",
+      "role": "GK",
+      "group": "GK",
+      "x": 4.865,
+      "y": 33.122,
+      "vx": 0.183,
+      "vy": 1.197,
+      "speed": 1.211,
+      "distance_m": 10.51
+    },
+    {
+      "id": "P2",
+      "role": "LB",
+      "group": "DEF",
+      "x": 22.253,
+      "y": 11.563,
+      "vx": -0.346,
+      "vy": 0.597,
+      "speed": 0.689,
+      "distance_m": 10.39
+    },
+    {
+      "id": "P3",
+      "role": "LCB",
+      "group": "DEF",
+      "x": 18.035,
+      "y": 26.859,
+      "vx": -0.048,
+      "vy": 0.193,
+      "speed": 0.199,
+      "distance_m": 4.44
+    },
+    {
+      "id": "P4",
+      "role": "RCB",
+      "group": "DEF",
+      "x": 16.853,
+      "y": 41.015,
+      "vx": 1.564,
+      "vy": -0.02,
+      "speed": 1.564,
+      "distance_m": 13.86
+    },
+    {
+      "id": "P5",
+      "role": "RB",
+      "group": "DEF",
+      "x": 19.945,
+      "y": 55.792,
+      "vx": 3.269,
+      "vy": 0.283,
+      "speed": 3.282,
+      "distance_m": 16.62
+    },
+    {
+      "id": "P6",
+      "role": "DM",
+      "group": "MID",
+      "x": 32.829,
+      "y": 32.392,
+      "vx": 2.961,
+      "vy": 2.193,
+      "speed": 3.685,
+      "distance_m": 18.96
+    },
+    {
+      "id": "P7",
+      "role": "LCM",
+      "group": "MID",
+      "x": 47.889,
+      "y": 20.532,
+      "vx": 0.151,
+      "vy": -0.726,
+      "speed": 0.741,
+      "distance_m": 10.49
+    },
+    {
+      "id": "P8",
+      "role": "RCM",
+      "group": "MID",
+      "x": 46.739,
+      "y": 47.318,
+      "vx": 1.719,
+      "vy": 0.93,
+      "speed": 1.955,
+      "distance_m": 16.13
+    },
+    {
+      "id": "P9",
+      "role": "AM",
+      "group": "MID",
+      "x": 58.304,
+      "y": 34.931,
+      "vx": -0.415,
+      "vy": -1.269,
+      "speed": 1.335,
+      "distance_m": 14.39
+    },
+    {
+      "id": "P10",
+      "role": "LS",
+      "group": "ATT",
+      "x": 72.089,
+      "y": 25.902,
+      "vx": -0.122,
+      "vy": 0.134,
+      "speed": 0.181,
+      "distance_m": 4.39
+    },
+    {
+      "id": "P11",
+      "role": "RS",
+      "group": "ATT",
+      "x": 74.439,
+      "y": 40.154,
+      "vx": -3.729,
+      "vy": 2.517,
+      "speed": 4.499,
+      "distance_m": 20.94
+    }
+  ],
+  "metrics": {
+    "formation_error_m": 1.271,
+    "centroid": {
+      "x": 37.658,
+      "y": 33.598
+    },
+    "team_length_m": 69.574,
+    "team_width_m": 44.229,
+    "line_gap_def_mid_m": 27.169,
+    "line_gap_mid_att_m": 26.824
+  }
+}

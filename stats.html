@@ -1,0 +1,305 @@
+<!doctype html>
+<html lang="it">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Statistiche partita</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Bricolage+Grotesque:opsz,wght@12..96,400;12..96,600;12..96,700&display=swap" rel="stylesheet">
+<style>
+:root{
+  --bg:#E9EEE8; --panel:#FAFBF9; --ink:#17261D; --muted:#5B6C60; --rule:#D3DCD2;
+  --hover:#EFF3EE; --top:#DCEBDD; --top-ink:#1E5A34; --field:#fff; --focus:#1F4FBF;
+  --radius:12px;
+  color-scheme:light;
+  font-family:"Bricolage Grotesque",system-ui,-apple-system,"Segoe UI",sans-serif;
+}
+@media (prefers-color-scheme:dark){
+  :root:not([data-theme="light"]){
+    --bg:#111813; --panel:#18211B; --ink:#E4EBE5; --muted:#9AAA9E; --rule:#2C3A30;
+    --hover:#1F2A22; --top:#21402B; --top-ink:#A8E0B8; --field:#1F2A22; --focus:#8AB4FF;
+    color-scheme:dark;
+  }
+}
+:root[data-theme="dark"]{
+  --bg:#111813; --panel:#18211B; --ink:#E4EBE5; --muted:#9AAA9E; --rule:#2C3A30;
+  --hover:#1F2A22; --top:#21402B; --top-ink:#A8E0B8; --field:#1F2A22; --focus:#8AB4FF;
+  color-scheme:dark;
+}
+*{box-sizing:border-box}
+body{margin:0;background:var(--bg);color:var(--ink);min-height:100vh}
+header{display:flex;flex-wrap:wrap;align-items:center;justify-content:space-between;gap:12px 16px;padding:14px 20px}
+h1{font-size:1.25rem;font-weight:700;margin:0;letter-spacing:-.01em}
+.tools{display:flex;flex-wrap:wrap;align-items:center;gap:8px}
+select,.btn{font:inherit;color:inherit;background:var(--field);border:1px solid var(--rule);border-radius:8px;padding:6px 12px;cursor:pointer}
+.btn{font-weight:600;text-decoration:none;display:inline-flex;align-items:center}
+.btn input{display:none}
+select:focus-visible,.btn:focus-within,.btn:focus-visible,th button:focus-visible{outline:2px solid var(--focus);outline-offset:2px}
+.status{display:inline-flex;align-items:center;gap:8px;font-size:.9rem;color:var(--muted);min-width:0;overflow-wrap:anywhere}
+.status i{flex:none;width:10px;height:10px;border-radius:50%;background:#B8860B}
+.status[data-state="ok"] i{background:#2E9E5B}
+.status[data-state="error"] i{background:#C0392B}
+main{padding:0 20px 20px;display:grid;grid-template-columns:minmax(0,1fr);gap:16px;max-width:1100px}
+.cards{display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:12px}
+.card{background:var(--panel);border:1px solid var(--rule);border-radius:var(--radius);padding:14px 16px}
+.card dt{color:var(--muted);font-size:.9rem}
+.card dd{margin:4px 0 0;font-size:1.6rem;font-weight:700;font-variant-numeric:tabular-nums}
+.card small{font-size:.95rem;font-weight:600;color:var(--muted);margin-left:4px}
+.panel{background:var(--panel);border:1px solid var(--rule);border-radius:var(--radius);overflow:hidden}
+.scroll{overflow-x:auto}
+table{width:100%;border-collapse:collapse;font-variant-numeric:tabular-nums;font-size:.95rem}
+th,td{padding:9px 12px;text-align:right;white-space:nowrap;border-bottom:1px solid var(--rule)}
+th:nth-child(-n+2),td:nth-child(-n+2){text-align:left}
+tbody tr:last-child td{border-bottom:0}
+tbody tr:hover{background:var(--hover)}
+th{font-weight:600;color:var(--muted);font-size:.85rem}
+th button{all:unset;cursor:pointer;border-radius:4px}
+th[aria-sort] button{color:var(--ink)}
+th[aria-sort="ascending"] button::after{content:" ▲";font-size:.7em}
+th[aria-sort="descending"] button::after{content:" ▼";font-size:.7em}
+td.top{background:var(--top);color:var(--top-ink);font-weight:700}
+td.na{color:var(--muted)}
+.id{font-weight:700}
+.empty{padding:16px;color:var(--muted);line-height:1.5}
+.empty code{background:var(--hover);padding:1px 6px;border-radius:4px}
+.note{color:var(--muted);font-size:.85rem;margin:0}
+@media (max-width:640px){
+  header,main{padding-left:16px;padding-right:16px}
+  .cards{grid-template-columns:1fr}
+  .card dd{font-size:1.3rem}
+}
+</style>
+</head>
+<body>
+<header>
+  <h1>Statistiche partita</h1>
+  <div class="tools">
+    <select id="run" aria-label="Partita"><option value="">Caricamento…</option></select>
+    <label class="btn">Carica JSON <input type="file" id="file" accept=".json,application/json"></label>
+    <a class="btn" id="replay" href="index.html">Apri replay</a>
+  </div>
+  <div class="status" id="status" data-state="wait" role="status" aria-live="polite"><i></i><span>Caricamento</span></div>
+</header>
+
+<main>
+  <dl class="cards" id="cards" hidden>
+    <div class="card"><dt>Distanza squadra</dt><dd><span id="teamDist">–</span><small>km</small></dd></div>
+    <div class="card"><dt>Passaggi</dt><dd id="teamPasses">–</dd></div>
+    <div class="card"><dt>Gol</dt><dd id="teamGoals">–</dd></div>
+  </dl>
+  <section class="panel">
+    <div class="scroll">
+      <table id="table" hidden>
+        <thead><tr id="head"></tr></thead>
+        <tbody id="body"></tbody>
+      </table>
+    </div>
+    <div class="empty" id="message">Caricamento delle partite…</div>
+  </section>
+  <p class="note">Passaggi, gol e parate sono ricavati dalle posizioni di palla e giocatori. Parate: solo portiere.</p>
+</main>
+
+<script>
+/* Data: backend stats API (docs/specs/player-match-stats.md).
+   Primary: PostgreSQL runs (?api=http://127.0.0.1:8765 default, ?run=<id>).
+   Fallback without PostgreSQL: the export JSON (?data=file.json, default
+   examples/simulation_trace.json) is fetched and posted to POST /stats. */
+const params = new URLSearchParams(location.search);
+const API = (params.get('api') || 'http://127.0.0.1:8765').replace(/\/$/, '');
+const DATA_URL = params.get('data');
+const FALLBACK_URL = 'examples/simulation_trace.json';
+const $ = id => document.getElementById(id);
+
+const COLS = [
+  { key: 'id',              label: '#',                 num: false, fmt: p => p.id },
+  { key: 'role',            label: 'Ruolo',             num: false, fmt: p => p.role },
+  { key: 'distance_m',      label: 'Distanza (m)',      num: true,  fmt: p => p.distance_m.toFixed(1) },
+  { key: 'avg_speed_mps',   label: 'Vel. media (km/h)', num: true,  fmt: p => (p.avg_speed_mps * 3.6).toFixed(1) },
+  { key: 'max_speed_mps',   label: 'Vel. max (km/h)',   num: true,  fmt: p => (p.max_speed_mps * 3.6).toFixed(1) },
+  { key: 'passes',          label: 'Passaggi',          num: true,  fmt: p => p.passes },
+  { key: 'passes_received', label: 'Ricevuti',          num: true,  fmt: p => p.passes_received },
+  { key: 'goals',           label: 'Gol',               num: true,  fmt: p => p.goals },
+  { key: 'saves',           label: 'Parate',            num: true,  fmt: p => p.saves ?? '—' },
+];
+let stats = null, sortKey = 'id', sortDir = 1;
+
+function setStatus(state, text){
+  $('status').dataset.state = state;
+  $('status').querySelector('span').textContent = text;
+}
+
+function showMessage(html){
+  $('table').hidden = true; $('cards').hidden = true;
+  $('message').hidden = false; $('message').innerHTML = html;
+}
+
+const UNREACHABLE = `Il backend non risponde su <code>${API}</code>: le statistiche si calcolano lì.
+  Avvialo con <code>uv run uvicorn track_team.app:app --app-dir src --port 8765</code>
+  (PostgreSQL non serve).`;
+
+async function fetchJson(url, init){
+  let r;
+  try { r = await fetch(url, init); }
+  catch { const e = new Error('unreachable'); e.unreachable = true; throw e; }
+  const body = await r.json().catch(() => null);
+  if (!r.ok){
+    const d = body && body.detail;
+    const e = new Error(typeof d === 'string' ? d : (d ? JSON.stringify(d) : 'HTTP ' + r.status));
+    e.status = r.status; throw e;
+  }
+  return body;
+}
+
+function playerNum(id){ const n = parseInt(String(id).slice(1), 10); return isNaN(n) ? 1e9 : n; }
+
+function compare(a, b){
+  if (sortKey === 'id') return (playerNum(a.id) - playerNum(b.id)) * sortDir;
+  const x = a[sortKey], y = b[sortKey];
+  if (x == null && y == null) return playerNum(a.id) - playerNum(b.id);
+  if (x == null) return 1;            // "—" always at the bottom
+  if (y == null) return -1;
+  if (typeof x === 'string') return x.localeCompare(y) * sortDir;
+  return (x - y) * sortDir || playerNum(a.id) - playerNum(b.id);
+}
+
+function buildHead(){
+  $('head').replaceChildren(...COLS.map(c => {
+    const th = document.createElement('th');
+    th.scope = 'col';
+    const b = document.createElement('button');
+    b.type = 'button'; b.textContent = c.label;
+    b.addEventListener('click', () => {
+      if (sortKey === c.key) sortDir = -sortDir;
+      else { sortKey = c.key; sortDir = c.num ? -1 : 1; }
+      renderTable();
+    });
+    th.append(b);
+    return th;
+  }));
+}
+
+function renderTable(){
+  const players = stats.players.slice().sort(compare);
+  const best = {};
+  for (const c of COLS.filter(c => c.num)){
+    const vals = stats.players.map(p => p[c.key]).filter(v => v != null);
+    const max = Math.max(...vals);
+    best[c.key] = vals.length && max > 0 ? max : null;
+  }
+  [...$('head').children].forEach((th, i) => {
+    if (COLS[i].key === sortKey) th.setAttribute('aria-sort', sortDir > 0 ? 'ascending' : 'descending');
+    else th.removeAttribute('aria-sort');
+  });
+  $('body').replaceChildren(...players.map(p => {
+    const tr = document.createElement('tr');
+    for (const c of COLS){
+      const td = document.createElement('td');
+      td.textContent = c.fmt(p);
+      if (c.key === 'id') td.className = 'id';
+      if (c.num && p[c.key] == null) td.className = 'na';
+      else if (c.num && best[c.key] !== null && p[c.key] === best[c.key]) td.className = 'top';
+      tr.append(td);
+    }
+    return tr;
+  }));
+}
+
+function render(data, source){
+  stats = data;
+  $('teamDist').textContent = (data.team.distance_m / 1000).toFixed(2);
+  $('teamPasses').textContent = data.team.passes;
+  $('teamGoals').textContent = data.team.goals;
+  $('message').hidden = true; $('cards').hidden = false; $('table').hidden = false;
+  renderTable();
+  setStatus('ok', `${data.name} · ${data.duration_s.toFixed(1)} s · ${data.frames} frame` + (source ? ` · ${source}` : ''));
+}
+
+async function loadRun(id){
+  if (!id) return;
+  setStatus('wait', 'Calcolo statistiche');
+  $('replay').href = 'index.html?run=' + encodeURIComponent(id) + (params.get('api') ? '&api=' + encodeURIComponent(API) : '');
+  const u = new URL(location.href); u.searchParams.set('run', id); history.replaceState(null, '', u);
+  try { render(await fetchJson(`${API}/runs/${encodeURIComponent(id)}/stats`)); }
+  catch (err){
+    setStatus('error', 'Errore');
+    if (err.unreachable) showMessage(UNREACHABLE);
+    else if (err.status === 503) showMessage('Il database non è raggiungibile. Avvialo con <code>docker compose up -d</code>.');
+    else showMessage('Impossibile calcolare le statistiche: ' + escapeHtml(err.message));
+  }
+}
+
+function escapeHtml(s){ return String(s).replace(/[&<>"']/g, ch => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[ch])); }
+
+async function postTrace(trace, name, source){
+  setStatus('wait', 'Calcolo statistiche');
+  try {
+    const data = await fetchJson(`${API}/stats`, {
+      method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(trace),
+    });
+    data.name = name;
+    render(data, source);
+  } catch (err){
+    setStatus('error', err.unreachable ? 'Backend non raggiungibile' : 'File non valido');
+    showMessage(err.unreachable ? UNREACHABLE : `${escapeHtml(name)}: ${escapeHtml(err.message)}`);
+  }
+}
+
+/* No PostgreSQL: compute stats from a whole export JSON served next to the page. */
+async function loadFile(url){
+  const name = url.split('/').pop();
+  $('run').replaceChildren(new Option(`${name} (file)`, ''));
+  $('replay').href = 'index.html?data=' + encodeURIComponent(url) + (params.get('api') ? '&api=' + encodeURIComponent(API) : '');
+  setStatus('wait', 'Lettura di ' + url);
+  let trace;
+  try {
+    const r = await fetch(url);
+    if (!r.ok) throw new Error('HTTP ' + r.status);
+    trace = await r.json();
+  } catch {
+    setStatus('error', 'File non trovato');
+    showMessage(`Impossibile leggere <code>${escapeHtml(url)}</code>. Servi la cartella del repo con
+      <code>python3 -m http.server 5500</code> oppure usa <strong>Carica JSON</strong>.`);
+    return;
+  }
+  postTrace(trace, name, 'file, senza database');
+}
+
+async function loadRuns(){
+  if (DATA_URL) return loadFile(DATA_URL);
+  const sel = $('run');
+  let runs;
+  try { runs = await fetchJson(`${API}/runs`); }
+  catch (err){
+    if (err.unreachable){
+      sel.replaceChildren(new Option('Nessuna partita', ''));
+      setStatus('error', 'Backend non raggiungibile');
+      showMessage(UNREACHABLE);
+      return;
+    }
+    return loadFile(FALLBACK_URL);  // backend up, PostgreSQL down
+  }
+  if (!runs.length) return loadFile(FALLBACK_URL);
+  sel.replaceChildren(...runs.map(r => new Option(`${r.name} · ${Number(r.duration_s || 0).toFixed(0)} s`, r.id)));
+  const wanted = params.get('run');
+  if (wanted && runs.some(r => String(r.id) === wanted)) sel.value = wanted;
+  loadRun(sel.value);
+}
+
+$('run').addEventListener('change', e => loadRun(e.target.value));
+
+$('file').addEventListener('change', async e => {
+  const f = e.target.files[0];
+  e.target.value = '';
+  if (!f) return;
+  let trace;
+  try { trace = JSON.parse(await f.text()); }
+  catch { setStatus('error', 'JSON non valido'); showMessage(`${escapeHtml(f.name)} non è un JSON valido.`); return; }
+  postTrace(trace, f.name, 'file caricato');
+});
+
+buildHead();
+loadRuns();
+</script>
+</body>
+</html>
