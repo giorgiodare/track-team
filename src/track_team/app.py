@@ -3,9 +3,12 @@
 import asyncio
 from collections.abc import AsyncIterator
 from contextlib import asynccontextmanager
+from typing import Any
 
-from fastapi import FastAPI, WebSocket, WebSocketDisconnect
+from fastapi import FastAPI, HTTPException, WebSocket, WebSocketDisconnect
+from fastapi.middleware.cors import CORSMiddleware
 
+from track_team import db
 from track_team.engine import Simulation
 from track_team.models import Frame, Phase
 
@@ -27,12 +30,47 @@ async def lifespan(_app: FastAPI) -> AsyncIterator[None]:
 
 
 app = FastAPI(title="track-team player simulation", lifespan=lifespan)
+app.add_middleware(
+    CORSMiddleware,
+    allow_origins=["*"],
+    allow_methods=["*"],
+    allow_headers=["*"],
+)
 
 
 @app.get("/health")
 def health() -> dict[str, str]:
     """Liveness probe."""
     return {"status": "ok"}
+
+
+@app.get("/runs")
+def runs() -> list[dict[str, Any]]:
+    """List recorded runs available for replay."""
+    with db.connect() as conn:
+        return db.list_runs(conn)
+
+
+@app.get("/runs/{run_id}")
+def run_detail(run_id: int) -> dict[str, Any]:
+    """Return one run's metadata, slots and frame count."""
+    with db.connect() as conn:
+        detail = db.get_run(conn, run_id)
+    if detail is None:
+        raise HTTPException(status_code=404, detail="run not found")
+    return detail
+
+
+@app.get("/runs/{run_id}/frames")
+def run_frames(run_id: int, from_idx: int = 0, limit: int = 100) -> dict[str, Any]:
+    """Return a chunk of replay frames (default 100 = 10 s at 10 fps)."""
+    with db.connect() as conn:
+        if db.get_run(conn, run_id) is None:
+            raise HTTPException(status_code=404, detail="run not found")
+        frames = db.get_frames(
+            conn, run_id, from_idx=max(0, from_idx), limit=max(1, min(limit, 500))
+        )
+    return {"run_id": run_id, "from_idx": max(0, from_idx), "frames": frames}
 
 
 @app.post("/simulation/start")

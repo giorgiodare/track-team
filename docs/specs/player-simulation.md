@@ -145,6 +145,28 @@ Default: `examples/simulation_trace.json`.
 - AC-09: il JSON generato è valido, contiene frame di tutte le fasi
   (`scattered`, `forming`, `attack`, `defense`) e 11 giocatori per frame.
 
+## 9. Replay da PostgreSQL (anti-lag)
+
+Il frontend replay non scarica più l'intero JSON: i frame stanno in
+PostgreSQL e arrivano a chunk da 100 frame (10 s). I dati restano a
+10 fps nativi; il browser interpola a schermo (niente frame inventati).
+
+Schema: `runs(id, name, seed, created_at, meta jsonb, slots jsonb)`,
+`frames(run_id, idx, t, phase, ball_x, ball_y, metrics jsonb)`,
+`player_positions(run_id, frame_idx, player_id, role, group, x, y, vx,
+vy, speed, distance_m)` con PK `(run_id, frame_idx, player_id)`.
+Connessione da `DATABASE_URL`; Postgres locale via `compose.yaml`.
+
+API: `GET /runs`, `GET /runs/{id}` (meta/slot/durata/conteggio),
+`GET /runs/{id}/frames?from_idx=0&limit=100`. Seed idempotente per nome:
+`uv run python scripts/seed_db.py [nome] [secondi]`.
+
+- AC-13: dopo il seed, DB contiene 650 frame e 650×11 posizioni per 65 s.
+- AC-14: un chunk da 100 frame risponde in < 200 ms in locale e il primo
+  frame del replay è servito senza scaricare l'intero trace.
+- AC-15: il frontend carica da API a chunk con prefetch, mantiene il
+  fallback da file JSON, e con `?fps=1` mostra il contatore fps.
+
 ## 8. Verifica pianificata
 
 `uv run pytest` (smoke/accettazione su motore + API, non TDD),

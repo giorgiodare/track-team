@@ -90,14 +90,16 @@ aside h2{font-size:1rem;margin:0;padding:16px 16px 8px;font-weight:600}
 </main>
 
 <script>
-/* ---------- Expected JSON (same shape the backend produces) ----------
-   meta.field_m {length,width}, meta.sensor_corners [{x,y}], meta.dt_s,
-   slots [{id,role,group,x,y}],
-   frames [{ t, phase, ball{x,y}, players[{id,role,group,x,y,vx,vy,speed,distance_m}], metrics{...} }]
-   Loads data.json next to this page. Use ?data=other.json to load a different file. */
+/* ---------- Data sources ----------
+   Primary: PostgreSQL via the backend API (?api=http://127.0.0.1:8765, default).
+   Frames arrive in chunks of 100 (10 s at 10 fps), cached + prefetched.
+   Fallback: ?data=file.json loads a whole export JSON as before. */
 
 const params = new URLSearchParams(location.search);
-const DATA_URL = params.get('data') || 'data.json';
+const API = params.get('api') || 'http://127.0.0.1:8765';
+const DATA_URL = params.get('data');
+const CHUNK = 100, CACHE_MAX = 4;
+const SHOW_FPS = params.get('fps') === '1';
 const GROUP_COLORS = { GK: '#F2B636', DEF: '#2E86DE', MID: '#E4572E', ATT: '#8E5BD6' };
 const TRAIL_S = 4, GRID_M = 10, MARGIN = 34;
 const METRICS = [
@@ -109,7 +111,9 @@ const METRICS = [
 ];
 
 const $ = id => document.getElementById(id);
-const canvas = $('pitch'), ctx = canvas.getContext('2d');
+const canvas = $('pitch');
+let ctx = canvas.getContext('2d');
+let pitchLayer = null;
 const listEl = $('list'), metricsEl = $('metrics'), statusEl = $('status');
 const playBtn = $('play'), scrub = $('scrub'), timeEl = $('time'), rateSel = $('rate');
 const optTrails = $('optTrails'), optSlots = $('optSlots');
@@ -118,6 +122,10 @@ let frames = [], slots = [], slotById = new Map(), corners = [];
 let pitch = { w: 105, h: 68 }, dt = 0.1, tStart = 0, tEnd = 0;
 let cur = 0, playing = true, rate = 1, selected = null, dragging = false;
 let rows = new Map(), metricEls = new Map(), shownIdx = -1, lastNow = 0;
+/* API mode: frames are not held whole, only cached chunks by start index. */
+let runId = null, frameCount = 0;
+const chunkCache = new Map(), chunkPending = new Map();
+let fpsFrames = 0, fpsLast = performance.now();
 
 /* ---------- Status ---------- */
 function setStatus(state, text){
@@ -145,6 +153,73 @@ async function loadUrl(url){
   }
 }
 
+/* ---------- PostgreSQL API source (chunked) ---------- */
+async function fetchChunk(start){
+  if (chunkCache.has(start) || chunkPending.has(start)) return chunkPending.get(start);
+  const p = fetch(`${API}/runs/${runId}/frames?from_idx=${start}&limit=${CHUNK}`)
+    .then(r => { if (!r.ok) throw new Error('HTTP ' + r.status); return r.json(); })
+    .then(d => {
+      chunkCache.set(start, d.frames);
+      while (chunkCache.size > CACHE_MAX){
+        const oldest = chunkCache.keys().next().value;
+        if (oldest === start) break;
+        chunkCache.delete(oldest);
+      }
+    })
+    .catch(() => {})
+    .finally(() => chunkPending.delete(start));
+  chunkPending.set(start, p);
+  return p;
+}
+
+function getFrame(i){
+  if (runId === null) return frames[i] || null;
+  if (i < 0 || i >= frameCount) return null;
+  const start = Math.floor(i / CHUNK) * CHUNK;
+  const chunk = chunkCache.get(start);
+  return chunk ? (chunk[i - start] || null) : null;
+}
+
+function ensureChunks(i){
+  if (runId === null) return;
+  const start = Math.floor(i / CHUNK) * CHUNK;
+  fetchChunk(start);
+  if (start + CHUNK < frameCount) fetchChunk(start + CHUNK);
+}
+
+async function loadApi(){
+  setStatus('wait', 'Loading runs from ' + API);
+  try {
+    const runs = await (await fetch(`${API}/runs`)).json();
+    if (!runs.length) throw new Error('no runs');
+    const wanted = params.get('run');
+    const run = wanted ? runs.find(r => String(r.id) === wanted)
+      : runs.reduce((a, b) => (b.frame_count > a.frame_count ? b : a));
+    if (!run) throw new Error('run not found');
+    const detail = await (await fetch(`${API}/runs/${run.id}`)).json();
+    runId = run.id;
+    frameCount = detail.frame_count;
+    const m = detail.meta || {};
+    if (m.field_m) pitch = { w: m.field_m.length, h: m.field_m.width };
+    corners = m.sensor_corners || [{x:0,y:0},{x:pitch.w,y:0},{x:0,y:pitch.h},{x:pitch.w,y:pitch.h}];
+    dt = m.dt_s || 0.1;
+    slots = detail.slots || [];
+    slotById = new Map(slots.map(s => [s.id, s]));
+    tStart = 0; tEnd = detail.duration_s || (frameCount - 1) * dt; cur = tStart;
+    scrub.min = tStart; scrub.max = tEnd; scrub.step = dt; scrub.value = cur;
+    selected = null; shownIdx = -1; pitchLayer = null;
+    await fetchChunk(0);
+    const first = getFrame(0);
+    if (!first) throw new Error('no frames');
+    buildRows(first);
+    buildMetrics();
+    setStatus('ok', `PostgreSQL run ${run.id} (${run.name}), ${frameCount} frames at ${Math.round(1/dt)} fps`);
+  } catch (err) {
+    setStatus('error', 'Could not load from ' + API);
+    message('Could not load runs from the backend API. Start Postgres (docker compose up -d), seed it (uv run python scripts/seed_db.py) and the backend, or pick a JSON file below.');
+  }
+}
+
 $('file').addEventListener('change', async e => {
   const f = e.target.files[0];
   if (!f) return;
@@ -160,6 +235,7 @@ function init(d, name){
     return;
   }
   frames = fs;
+  runId = null; frameCount = frames.length; chunkCache.clear();
   const m = d.meta || {};
   if (m.field_m) pitch = { w: m.field_m.length, h: m.field_m.width };
   corners = m.sensor_corners || [{x:0,y:0},{x:pitch.w,y:0},{x:0,y:pitch.h},{x:pitch.w,y:pitch.h}];
@@ -168,7 +244,7 @@ function init(d, name){
   slotById = new Map(slots.map(s => [s.id, s]));
   tStart = frames[0].t; tEnd = frames[frames.length - 1].t; cur = tStart;
   scrub.min = tStart; scrub.max = tEnd; scrub.step = dt; scrub.value = cur;
-  selected = null; shownIdx = -1;
+  selected = null; shownIdx = -1; pitchLayer = null;
   buildRows(frames[0]);
   buildMetrics();
   setStatus('ok', `${name}, ${frames.length} frames`);
@@ -220,6 +296,7 @@ function updateUI(a){
 
 /* ---------- Sampling the timeline ---------- */
 function frameIndex(t){
+  if (runId !== null) return Math.min(frameCount - 1, Math.max(0, Math.floor((t - tStart) / dt)));
   let lo = 0, hi = frames.length - 1;
   while (lo < hi){ const m = (lo + hi + 1) >> 1; if (frames[m].t <= t) lo = m; else hi = m - 1; }
   return lo;
@@ -227,7 +304,9 @@ function frameIndex(t){
 const lerp = (p, q, k) => p + (q - p) * k;
 
 function sample(t){
-  const i = frameIndex(t), a = frames[i], b = frames[Math.min(i + 1, frames.length - 1)];
+  const i = frameIndex(t), a = getFrame(i);
+  if (!a) return null;
+  const b = getFrame(Math.min(i + 1, frameCount - 1)) || a;
   const span = b.t - a.t;
   const k = span > 0 ? Math.min(Math.max((t - a.t) / span, 0), 1) : 0;
   return { i, a, b, k };
@@ -252,6 +331,20 @@ function resize(){
   canvas.width = Math.round(r.width * dpr); canvas.height = Math.round(r.height * dpr);
   ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
   view.cw = r.width; view.ch = r.height;
+  pitchLayer = null;
+}
+
+function ensurePitchLayer(){
+  if (pitchLayer) return;
+  layout();
+  pitchLayer = document.createElement('canvas');
+  pitchLayer.width = canvas.width; pitchLayer.height = canvas.height;
+  const pctx = pitchLayer.getContext('2d');
+  const main = ctx;
+  ctx = pctx;
+  pctx.setTransform(window.devicePixelRatio || 1, 0, 0, window.devicePixelRatio || 1, 0, 0);
+  drawPitch();
+  ctx = main;
 }
 new ResizeObserver(resize).observe(canvas);
 
@@ -344,22 +437,18 @@ function drawPlayers(smp){
       ctx.beginPath(); ctx.moveTo(sx, sy); ctx.lineTo(cx, cy); ctx.stroke();
     }
     if (optTrails.checked){
-      let prev = null;
-      const pts = [];
-      for (let j = first; j <= i; j++){
-        const q = frames[j].players[n];
-        if (q && q.id === pa.id) pts.push([q.x, q.y]);
+      /* One polyline per player (was one stroke per segment: the main lag). */
+      ctx.strokeStyle = hexA(color, 0.55); ctx.lineWidth = 3; ctx.lineCap = 'round';
+      ctx.beginPath();
+      let started = false;
+      for (let j = first; j <= i; j += 2){
+        const f = getFrame(j), q = f && f.players[n];
+        if (!q || q.id !== pa.id) continue;
+        const cp = px(q.x, q.y);
+        if (!started){ ctx.moveTo(cp[0], cp[1]); started = true; } else ctx.lineTo(cp[0], cp[1]);
       }
-      pts.push([x, y]);
-      ctx.lineWidth = 3; ctx.lineCap = 'round';
-      pts.forEach((pt, idx) => {
-        const cp = px(pt[0], pt[1]);
-        if (prev){
-          ctx.strokeStyle = hexA(color, (idx / pts.length) * 0.85);
-          ctx.beginPath(); ctx.moveTo(prev[0], prev[1]); ctx.lineTo(cp[0], cp[1]); ctx.stroke();
-        }
-        prev = cp;
-      });
+      ctx.lineTo(cx, cy);
+      if (started) ctx.stroke();
     }
     if (selected === pa.id){
       ctx.strokeStyle = '#fff'; ctx.lineWidth = 2;
@@ -395,27 +484,40 @@ function drawBallAndCentroid(smp){
 /* ---------- Main loop ---------- */
 function frame(now){
   const elapsed = Math.min((now - lastNow) / 1000, 0.25); lastNow = now;
+  if (SHOW_FPS){
+    fpsFrames++;
+    if (now - fpsLast >= 500){
+      const fps = Math.round(fpsFrames * 1000 / (now - fpsLast));
+      statusEl.querySelector('span').dataset.fps = fps;
+      document.title = `Training pitch replay — ${fps} fps`;
+      fpsFrames = 0; fpsLast = now;
+    }
+  }
   ctx.clearRect(0, 0, view.cw, view.ch);
-  layout(); drawPitch();
-  if (frames.length){
+  layout(); ensurePitchLayer();
+  if (pitchLayer) ctx.drawImage(pitchLayer, 0, 0, view.cw, view.ch);
+  if (frameCount){
     if (playing && !dragging){
       cur += elapsed * rate;
-      if (cur >= tEnd){ cur = tStart; }
+      if (cur >= tEnd){ cur = tStart; shownIdx = -1; }
     }
     cur = Math.min(Math.max(cur, tStart), tEnd);
+    ensureChunks(frameIndex(cur));
     const smp = sample(cur);
-    if (smp.i !== shownIdx){ shownIdx = smp.i; updateUI(smp.a); }
-    if (!dragging) scrub.value = cur;
-    timeEl.textContent = `${(cur - tStart).toFixed(1)} / ${(tEnd - tStart).toFixed(1)} s`;
-    drawSlots(); drawPlayers(smp); drawBallAndCentroid(smp);
+    if (smp){
+      if (smp.i !== shownIdx){ shownIdx = smp.i; updateUI(smp.a); }
+      if (!dragging) scrub.value = cur;
+      timeEl.textContent = `${(cur - tStart).toFixed(1)} / ${(tEnd - tStart).toFixed(1)} s`;
+      drawSlots(); drawPlayers(smp); drawBallAndCentroid(smp);
+    }
   }
   requestAnimationFrame(frame);
 }
 
 /* ---------- Start ---------- */
 resize();
-message('Loading ' + DATA_URL);
-loadUrl(DATA_URL);
+if (DATA_URL){ message('Loading ' + DATA_URL); loadUrl(DATA_URL); }
+else loadApi();
 requestAnimationFrame(t => { lastNow = t; requestAnimationFrame(frame); });
 </script>
 </body>
