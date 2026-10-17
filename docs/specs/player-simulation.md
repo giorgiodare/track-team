@@ -55,6 +55,52 @@ Fasi (`Phase`): `scattered → forming → attack ⇄ defense` (`idle` prima del
 - `run-demo`: sequenza automatica da palco
   `scattered (3 s) → forming → attack (18 s) → defense (18 s) → attack …`.
 
+## 4ter. Pattern d'attacco (dal video di riferimento)
+
+Schema estratto dal video "Attacking Patterns in a 4-4-2"
+(youtube.com/watch?v=m4IYapfmCv4, animazione tattica 20 s): costruzione
+centrale, palla larga sulla fascia, terzino che sovrappone fino al fondo,
+cross per le due punte su primo/secondo palo, conclusione, recupero e
+ripartenza sull'altra fascia. Il video usa un 4-4-2 piatto; qui è tradotto
+nei ruoli del rombo: la fascia la creano mezzala + terzino.
+
+Ciclo d'attacco di 16 s, fascia alternata a ogni ciclo:
+
+1. Costruzione (0–5 s): palla al mediano P6, squadra che sale compatta.
+2. Uscita larga (5–9 s): palla alla mezzala di fascia, il terzino dello
+   stesso lato sovrappone fino alla linea di fondo (x ≥ 85).
+3. Cross e conclusione (9–12 s): cross del terzino, punta vicina sul primo
+   palo e lontana sul secondo (x ≥ 90), trequartista al limite; tiro in
+   porta (palla a x ≥ 100).
+4. Recupero (12–16 s): rientro verso le posizioni d'attacco; ciclo
+   successivo sulla fascia opposta.
+
+Sequenza palla sincronizzata: P6 → mezzala di fascia → trequartista →
+terzino in sovrapposizione → punta primo palo → porta.
+
+- AC-12: in 32 s di `attack` entrambi i terzini superano x = 85 m (uno
+  per fascia), almeno una punta supera x = 90 m e la palla supera
+  x = 100 m (conclusione).
+
+## 4bis. Palla coerente con i giocatori
+
+La palla non segue un percorso indipendente: dipende dai giocatori.
+
+- `scattered`/`forming`: palla ferma al centro (52.5, 34).
+- `attack`: possesso a catena P6→P7→P9→P10→P9→P8→P11→P6. Chi ha palla la
+  tiene a ~0.8 m davanti a sé e la segue; dopo ~1.6 s passa al compagno
+  successivo: la palla viaggia verso la posizione *attuale* del ricevente
+  (che si muove) a 18 m/s, e al ricevimento il possesso cambia.
+- `defense`: palla avversaria che si muove (≤ 6 m/s) tra waypoint davanti
+  al blocco (x ≥ 60); il blocco scivola verso il lato palla e P10 pressa.
+- Al cambio scenario la palla può essere riposizionata (nuovo possesso);
+  i giocatori non si teletrasportano mai.
+
+- AC-10: in `attack`, in almeno metà dei frame la palla è entro 2.5 m da
+  un giocatore, e in 12 s percorre più di 30 m.
+- AC-11: in `defense`, la palla resta sempre a x ≥ 55 m (metà avversaria
+  davanti al blocco) e dentro il campo.
+
 ## 5. Invarianti
 
 - INV-1: `0 ≤ x ≤ 105`, `0 ≤ y ≤ 68` per giocatori e palla, sempre.

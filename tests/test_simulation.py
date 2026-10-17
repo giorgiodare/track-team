@@ -1,6 +1,7 @@
 """Acceptance checks for docs/specs/player-simulation.md (AC-01..AC-08)."""
 
 import json
+import math
 from pathlib import Path
 
 from fastapi.testclient import TestClient
@@ -104,6 +105,51 @@ def test_ac09_export_trace_json_covers_all_phases(tmp_path: Path) -> None:
         "defense",
     }
     assert all(len(frame["players"]) == 11 for frame in payload["frames"])
+
+
+def test_ac10_attack_ball_stays_with_players_and_travels() -> None:
+    sim = Simulation(seed=7)
+    sim.start()
+    _run(sim, 20.0)
+    sim.set_phase(Phase.ATTACK)
+    frames = [sim.step(0.1) for _ in range(120)]
+    close = sum(
+        min(math.hypot(f.ball.x - p.x, f.ball.y - p.y) for p in f.players) < 2.5
+        for f in frames
+    )
+    travelled = sum(
+        math.hypot(b.ball.x - a.ball.x, b.ball.y - a.ball.y)
+        for a, b in zip(frames, frames[1:], strict=False)
+    )
+    assert close / len(frames) >= 0.5
+    assert travelled > 30.0
+    assert all(0.0 <= f.ball.x <= 105.0 and 0.0 <= f.ball.y <= 68.0 for f in frames)
+
+
+def test_ac11_defense_ball_stays_in_front_of_block() -> None:
+    sim = Simulation(seed=7)
+    sim.start()
+    _run(sim, 20.0)
+    sim.set_phase(Phase.DEFENSE)
+    frames = [sim.step(0.1) for _ in range(120)]
+    assert all(f.ball.x >= 55.0 for f in frames)
+    assert all(0.0 <= f.ball.y <= 68.0 for f in frames)
+
+
+def test_ac12_video_pattern_alternates_flanks_and_finishes() -> None:
+    sim = Simulation(seed=7)
+    sim.start()
+    _run(sim, 20.0)
+    sim.set_phase(Phase.ATTACK)
+    frames = [sim.step(0.1) for _ in range(320)]
+    max_x = {
+        pid: max(p.x for f in frames for p in f.players if p.id == pid)
+        for pid in ("P2", "P5", "P10", "P11")
+    }
+    assert max_x["P5"] > 85.0  # right full-back overlaps on cycle 1
+    assert max_x["P2"] > 85.0  # left full-back overlaps on cycle 2
+    assert max(max_x["P10"], max_x["P11"]) > 90.0  # striker attacks the box
+    assert max(f.ball.x for f in frames) > 100.0  # shot on goal
 
 
 def test_ac08_frame_contract_round_trips() -> None:
